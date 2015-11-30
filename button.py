@@ -47,11 +47,11 @@ def main():
         GPIO.setup(LED_OUT, GPIO.OUT)
 
         print 'Testing button...'
-            while (True):
-                    if button.was_pushed():
+        while (True):
+            if button.was_pushed():
                 print 'Pushed!'
                 GPIO.output(LED_OUT, True)
-                    time.sleep(0.1)
+            time.sleep(0.1)
             GPIO.output(LED_OUT, False)
     except KeyboardInterrupt:
         pass
