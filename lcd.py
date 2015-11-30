@@ -48,7 +48,7 @@ class LCD(object):
 
     def output(self, lines):
         #if type(lines) == string:
-        #   lines = lines.split('\n')
+        #    lines = lines.split('\n')
         # Make sure we blank all following lines
         while (len(lines) < 4):
             lines.append('')
