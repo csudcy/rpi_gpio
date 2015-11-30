@@ -11,12 +11,16 @@ TODO:
 
 
 class Button(object):
+    """
+    A simple interface for a button
+    """
+
     def __init__(
             self,
             pin,
         ):
         self.PIN = pin
-
+ 
         self._init_button()
 
     def _init_button(self):
@@ -42,16 +46,16 @@ def main():
         button = Button(
             pin=11,
         )
-
+ 
         LED_OUT = 8
         GPIO.setup(LED_OUT, GPIO.OUT)
-
+ 
         print 'Testing button...'
         while (True):
             if button.was_pushed():
                 print 'Pushed!'
                 GPIO.output(LED_OUT, True)
-            time.sleep(0.1)
+                time.sleep(0.1)
             GPIO.output(LED_OUT, False)
     except KeyboardInterrupt:
         pass

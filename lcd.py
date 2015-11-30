@@ -11,6 +11,10 @@ TODO:
 
 
 class LCD(object):
+    """
+    A simple interface for an LCD display
+    """
+
     # Define some device constants
     LCD_CHR = True
     LCD_CMD = False

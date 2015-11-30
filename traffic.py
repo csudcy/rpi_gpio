@@ -59,6 +59,10 @@ STATE_INFO = {
 
 
 class Traffic(object):
+    """
+    Emulates a set of traffic lights
+    """
+
     def __init__(
             self,
             pin_red=14,

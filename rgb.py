@@ -16,6 +16,10 @@ TODO:
 
 
 class RGB(object):
+    """
+    A simple interface for an RGB LED
+    """
+
     PWM_FREQ = 500
 
     def __init__(
