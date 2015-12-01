@@ -238,6 +238,8 @@ def test_rainbow_train(rgb_strip):
         # Move the train along
         index = (index + 1) % rgb_strip.LED_COUNT
 
+        time.sleep(0.02)
+
 
 def test_rainbow(rgb_strip):
     """
@@ -347,8 +349,8 @@ def main():
         GPIO.setmode(GPIO.BCM)
         rgb_strip = RGBStrip(
             led_count=60,
-            pin_data=GPIO22.MOSI,
-            pin_clock=GPIO22.SCLK,
+            #pin_data=GPIO22.MOSI,
+            #pin_clock=GPIO22.SCLK,
         )
 
         print 'Testing rgb_strip...'
@@ -364,7 +366,8 @@ def main():
         print 'Cleaning up...'
         if rgb_strip and rgb_strip.SPI:
             rgb_strip.SPI.close()
-        GPIO.cleanup()
+        else:
+            GPIO.cleanup()
     print 'Bye!'
 
 
