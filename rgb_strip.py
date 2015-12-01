@@ -32,12 +32,6 @@ class RGBStrip(object):
     A simple interface for an APA102 RGB LED strip
     """
 
-    # Indexes for colour lists
-    R = 0
-    G = 1
-    B = 2
-    A = 3
-
     def __init__(
             self,
             led_count,
@@ -48,11 +42,22 @@ class RGBStrip(object):
         Note: To enable SPI mode, omit pin_data and pin_clock
         """
         self.LED_COUNT = led_count
-        self.LEDS = [
-            [0, 0, 0, 0]
-            for i in xrange(led_count)
-        ]
 
+        # Work out some byte counts
+        self.BYTES_START = 4
+        self.BYTES_LED = self.LED_COUNT * 4
+        end_bit_count = self.LED_COUNT / 2.0
+        self.BYTES_END = int(math.ceil(end_bit_count / 8.0))
+        self.BYTES_TOTAL = self.BYTES_START + self.BYTES_LED + self.BYTES_END
+
+        # Setup the byte array that we will output
+        self.BYTES = [0] * self.BYTES_TOTAL
+
+        # Setup the start & end frames
+        self.BYTES[:self.BYTES_START] = [0x00] * self.BYTES_START
+        self.BYTES[-self.BYTES_END:] = [0xFF] * self.BYTES_END
+
+        # Where to write the data to (depending on our mode)
         self.SPI = None
         self.PIN_DATA = None
         self.PIN_CLOCK = None
@@ -64,12 +69,6 @@ class RGBStrip(object):
             self._init_pins(pin_data, pin_clock)
 
     def _init_spi(self):
-        # Prepare the common frames
-        self.START_FRAME = [0x00] * 4
-        end_bits = self.LED_COUNT / 2.0
-        end_bytes = end_bits / 8.0
-        self.END_FRAME = [0xFF] * int(math.ceil(end_bytes))
-
         # Init the SPI bus
         import spidev
         self.SPI = spidev.SpiDev()
@@ -83,13 +82,7 @@ class RGBStrip(object):
         self.PIN_DATA = pin_data
         self.PIN_CLOCK = pin_clock
 
-        # Prepare the common frames
-        self.START_FRAME = [False] * 32
-        self.PADDING_FRAME = [True] * 3
-        self.END_FRAME = [True] * (self.LED_COUNT/2)
-
-        # Prepare lookup tables
-        self.BITS_5 = self._generate_binary_array_lookup(5)
+        # Prepare lookup table
         self.BITS_8 = self._generate_binary_array_lookup(8)
 
         # Setup GPIO
@@ -103,7 +96,7 @@ class RGBStrip(object):
         )
 
     def _generate_binary_array_lookup(self, bit_count):
-        # Generate a lookup for 0-31 in 5 bit binary arrays
+        # Generate a lookup for 0-2**bit_count in bit_count bit binary arrays
         return [
             [
                 bit=='1'
@@ -112,26 +105,46 @@ class RGBStrip(object):
             for num in xrange(2**bit_count)
         ]
 
+    def _get_led_offset(self, index):
+        return self.BYTES_START + index * 4
+
     def set_leds(self, r=0, g=0, b=0, a=0):
-        for led in self.LEDS:
-            led[RGBStrip.R] = r
-            led[RGBStrip.G] = g
-            led[RGBStrip.B] = b
-            led[RGBStrip.A] = a
+        for offset in xrange(self.BYTES_START, self.BYTES_START + self.BYTES_LED, 4):
+            self._set_led(
+                offset,
+                r,
+                g,
+                b,
+                a
+            )
 
     def set_led(self, index, r=0, g=0, b=0, a=0):
-        led = self.LEDS[index % self.LED_COUNT]
-        led[RGBStrip.R] = int(r)
-        led[RGBStrip.G] = int(g)
-        led[RGBStrip.B] = int(b)
-        led[RGBStrip.A] = int(a)
+        offset = self._get_led_offset(index)
+        self._set_led(
+            self._get_led_offset(index),
+            r,
+            g,
+            b,
+            a
+        )
 
     def add_led(self, index, r=0, g=0, b=0, a=0):
-        led = self.LEDS[index % self.LED_COUNT]
-        led[RGBStrip.R] = min(led[RGBStrip.R] + int(r), 255)
-        led[RGBStrip.G] = min(led[RGBStrip.G] + int(g), 255)
-        led[RGBStrip.B] = min(led[RGBStrip.B] + int(b), 255)
-        led[RGBStrip.A] = min(led[RGBStrip.A] + int(a), 255)
+        offset = self._get_led_offset(index)
+        self._set_led(
+            self._get_led_offset(index),
+            self.BYTES[offset + 3] + r,
+            self.BYTES[offset + 2] + g,
+            self.BYTES[offset + 1] + b,
+            self.BYTES[offset + 0] + a
+        )
+
+    def _set_led(self, offset, r, g, b, a):
+        # Brightness max is 31; or with 224 to add the padding 1s
+        self.BYTES[offset + 0] = (int(a) & 31) | 224
+        # R, G, B are max 255
+        self.BYTES[offset + 1] = int(b) & 255
+        self.BYTES[offset + 2] = int(g) & 255
+        self.BYTES[offset + 3] = int(r) & 255
 
     def output(self):
         if self.SPI:
@@ -140,53 +153,18 @@ class RGBStrip(object):
             self._output_pins()
 
     def _output_spi(self):
-        # TODO store it in memory like this
-        to_output = []
-        to_output += self.START_FRAME
-        for led in self.LEDS:
-            brightness_with_padding = 224 + led[RGBStrip.A]
-            to_output += [
-                brightness_with_padding,
-                led[RGBStrip.B],
-                led[RGBStrip.G],
-                led[RGBStrip.R]
-            ]
-        to_output += self.END_FRAME
-
-        self.SPI.writebytes(to_output)
+        self.SPI.writebytes(self.BYTES)
 
     def _output_pins(self):
-        # 32 - Start frame of 0s
-        self._output_bits(self.START_FRAME)
+        for byte in self.BYTES:
+            bits = self.BITS_8[byte]
+            for bit in bits:
+                # Set the data pin
+                GPIO.output(self.PIN_DATA, bit)
 
-        # Output each LED's values
-        for led in self.LEDS:
-            # 3 - Padding of 1s
-            self._output_bits(self.PADDING_FRAME)
-
-            # 5 - Brightness
-            self._output_bits(self.BITS_5[led[RGBStrip.A]])
-
-            # 8 - Blue
-            self._output_bits(self.BITS_8[led[RGBStrip.B]])
-
-            # 8 - Green
-            self._output_bits(self.BITS_8[led[RGBStrip.G]])
-
-            # 8 - Red
-            self._output_bits(self.BITS_8[led[RGBStrip.R]])
-
-        # (LED_COUNT/2) - End frame of 1s
-        self._output_bits(self.END_FRAME)
-
-    def _output_bits(self, bits):
-        for bit in bits:
-            # Set the data pin
-            GPIO.output(self.PIN_DATA, bit)
-
-            # Cycle the clock
-            GPIO.output(self.PIN_CLOCK, True)
-            GPIO.output(self.PIN_CLOCK, False)
+                # Cycle the clock
+                GPIO.output(self.PIN_CLOCK, True)
+                GPIO.output(self.PIN_CLOCK, False)
 
     @staticmethod
     def get_rgb_rainbow(count, max_rgb=127):
@@ -369,16 +347,16 @@ def main():
         GPIO.setmode(GPIO.BCM)
         rgb_strip = RGBStrip(
             led_count=60,
-            #pin_data=GPIO22.MOSI,
-            #pin_clock=GPIO22.SCLK,
+            pin_data=GPIO22.MOSI,
+            pin_clock=GPIO22.SCLK,
         )
 
         print 'Testing rgb_strip...'
         #test_rainbow_train(rgb_strip)
         #test_clock(rgb_strip)
         #test_brightness(rgb_strip)
-        #test_rainbow(rgb_strip)
-        test_gravity(rgb_strip)
+        test_rainbow(rgb_strip)
+        #test_gravity(rgb_strip)
 
     except KeyboardInterrupt:
         pass
