@@ -72,19 +72,26 @@ class RGBStrip(object):
             GPIO.OUT,
         )
 
-    def reset_leds(self):
+    def reset_leds(self, r=0, g=0, b=0, a=0):
         for led in self.LEDS:
-            led[RGBStrip.R] = 0
-            led[RGBStrip.G] = 0
-            led[RGBStrip.B] = 0
-            led[RGBStrip.A] = 0
+            led[RGBStrip.R] = r
+            led[RGBStrip.G] = g
+            led[RGBStrip.B] = b
+            led[RGBStrip.A] = a
 
     def set_led(self, index, r, g, b, a):
-        led = self.LEDS[index]
-        led[RGBStrip.R] = r
-        led[RGBStrip.G] = g
-        led[RGBStrip.B] = b
-        led[RGBStrip.A] = a
+        led = self.LEDS[index % self.LED_COUNT]
+        led[RGBStrip.R] = int(r)
+        led[RGBStrip.G] = int(g)
+        led[RGBStrip.B] = int(b)
+        led[RGBStrip.A] = int(a)
+
+    def add_led(self, index, r, g, b, a):
+        led = self.LEDS[index % self.LED_COUNT]
+        led[RGBStrip.R] += int(r)
+        led[RGBStrip.G] += int(g)
+        led[RGBStrip.B] += int(b)
+        led[RGBStrip.A] += int(a)
 
     def get_led(self, index):
         return self.LEDS[index]
@@ -123,17 +130,63 @@ class RGBStrip(object):
             GPIO.output(self.PIN_CLOCK, False)
 
 
-def test_rainbow(rgb_strip):
+def test_brightness(rgb_strip):
+    """
+    Test what different brightness & RGB levels look like
+    """
+    COLOURS = (
+        (255,   0,   0),
+        (255, 255,   0),
+        (  0, 255,   0),
+        (  0, 255, 255),
+        (  0,   0, 255),
+        (255,   0, 255),
+    )
+    COLOUR = 0
+    while (True):
+        # Get the current colour and move to the next colour
+        COLOUR_R, COLOUR_G, COLOUR_B = COLOURS[COLOUR]
+        COLOUR = (COLOUR + 1) % len(COLOURS)
+
+        rgb_strip.set_led(0, COLOUR_R, COLOUR_G, COLOUR_B, 31)
+        rgb_strip.set_led(1, COLOUR_R, COLOUR_G, COLOUR_B, 23)
+        rgb_strip.set_led(2, COLOUR_R, COLOUR_G, COLOUR_B, 15)
+        rgb_strip.set_led(3, COLOUR_R, COLOUR_G, COLOUR_B, 7)
+        rgb_strip.set_led(4, COLOUR_R, COLOUR_G, COLOUR_B, 1)
+        rgb_strip.set_led(5, COLOUR_R, COLOUR_G, COLOUR_B, 0)
+
+        rgb_strip.set_led(7, COLOUR_R*1.0, COLOUR_G*1.0, COLOUR_B*1.0, 31)
+        rgb_strip.set_led(8, COLOUR_R*0.8, COLOUR_G*0.8, COLOUR_B*0.8, 31)
+        rgb_strip.set_led(9, COLOUR_R*0.6, COLOUR_G*0.6, COLOUR_B*0.6, 31)
+        rgb_strip.set_led(10, COLOUR_R*0.4, COLOUR_G*0.4, COLOUR_B*0.4, 31)
+        rgb_strip.set_led(11, COLOUR_R*0.2, COLOUR_G*0.2, COLOUR_B*0.2, 31)
+        rgb_strip.set_led(12, COLOUR_R/255, COLOUR_G/255, COLOUR_B/255, 31)
+
+        rgb_strip.set_led(14, COLOUR_R*1.0, COLOUR_G*1.0, COLOUR_B*1.0, 1)
+        rgb_strip.set_led(15, COLOUR_R*0.8, COLOUR_G*0.8, COLOUR_B*0.8, 1)
+        rgb_strip.set_led(16, COLOUR_R*0.6, COLOUR_G*0.6, COLOUR_B*0.6, 1)
+        rgb_strip.set_led(17, COLOUR_R*0.4, COLOUR_G*0.4, COLOUR_B*0.4, 1)
+        rgb_strip.set_led(18, COLOUR_R*0.2, COLOUR_G*0.2, COLOUR_B*0.2, 1)
+        rgb_strip.set_led(19, COLOUR_R/255, COLOUR_G/255, COLOUR_B/255, 1)
+
+        rgb_strip.output()
+
+        time.sleep(1)
+
+
+def test_rainbow_train(rgb_strip):
+    """
+    Make 6 colors move along the strip & cycle round
+    """
     index = 0
     while (True):
         # Output the LEDs
-        #rgb_strip.reset_leds()
-        rgb_strip.set_led((index +  5) % rgb_strip.LED_COUNT, 255,   0,   0, 1)
-        rgb_strip.set_led((index +  4) % rgb_strip.LED_COUNT, 255, 255,   0, 1)
-        rgb_strip.set_led((index +  3) % rgb_strip.LED_COUNT,   0, 255,   0, 1)
-        rgb_strip.set_led((index +  2) % rgb_strip.LED_COUNT,   0, 255, 255, 1)
-        rgb_strip.set_led((index +  1) % rgb_strip.LED_COUNT,   0,   0, 255, 1)
-        rgb_strip.set_led((index +  0) % rgb_strip.LED_COUNT, 255,   0, 255, 1)
+        rgb_strip.set_led((index +  5) % rgb_strip.LED_COUNT, 255,   0,   0, 31)
+        rgb_strip.set_led((index +  4) % rgb_strip.LED_COUNT, 255, 255,   0, 31)
+        rgb_strip.set_led((index +  3) % rgb_strip.LED_COUNT,   0, 255,   0, 31)
+        rgb_strip.set_led((index +  2) % rgb_strip.LED_COUNT,   0, 255, 255, 31)
+        rgb_strip.set_led((index +  1) % rgb_strip.LED_COUNT,   0,   0, 255, 31)
+        rgb_strip.set_led((index +  0) % rgb_strip.LED_COUNT, 255,   0, 255, 31)
         rgb_strip.output()
 
         # Reset the first LED (all others will get changed again next time)
@@ -142,25 +195,69 @@ def test_rainbow(rgb_strip):
         # Move the LED along
         index = (index + 1) % rgb_strip.LED_COUNT
 
+
+def get_rgba_rainbow(count, max_rgb=25, a=7):
+    # Thanks to http://stackoverflow.com/questions/876853/generating-color-ranges-in-python
+    import colorsys
+    HSV_tuples = [
+        (x*1.0/count, 1, 1)
+        for x in range(count)
+    ]
+    RGB_tuples = map(
+        lambda x: colorsys.hsv_to_rgb(*x),
+        HSV_tuples
+    )
+    
+    # Convert RGB tuples (0-1) to RGBA tuples (0-255)
+    RGBA_tuples = [
+        (
+            int(r*max_rgb),
+            int(g*max_rgb),
+            int(b*max_rgb),
+            a
+        )
+        for r, g, b in RGB_tuples
+    ]
+    return RGBA_tuples
+
+
+def test_rainbow(rgb_strip):
+    """
+    Make the whole strip into a cycling rainbow
+    """
+    # Work out a rainbow for #LED_COUNT leds
+    COLOURS = get_rgba_rainbow(rgb_strip.LED_COUNT, max_rgb=127, a=1)
+    
+    index = 0
+    while (True):
+        # Output the LEDs
+        for i in xrange(rgb_strip.LED_COUNT):
+            rgb_strip.set_led((index +  i) % rgb_strip.LED_COUNT, *COLOURS[i])
+        rgb_strip.output()
+
+        # Move the LED along
+        index = (index + 1) % rgb_strip.LED_COUNT
+
+
 def test_clock(rgb_strip):
     last_hms = None
     while True:
         now = datetime.now()
         hms = (now.hour, now.minute, now.second)
         if hms != last_hms:
-            print hms
-            if last_hms is not None:
-                # Clear previous time
-                rgb_strip.set_led(last_hms[0], 0, 0, 0, 0)
-                rgb_strip.set_led(last_hms[1], 0, 0, 0, 0)
-                rgb_strip.set_led(last_hms[2], 0, 0, 0, 0)
+            # Clear all the LEDs
+            rgb_strip.reset_leds(a=1)
 
             # Set new time
-            rgb_strip.set_led(hms[0], 255, 0, 0, 1)
-            led_m = rgb_strip.get_led(hms[1])
-            rgb_strip.set_led(hms[1], led_m[0], led_m[1] + 255, led_m[2], 1)
-            led_s = rgb_strip.get_led(hms[2])
-            rgb_strip.set_led(hms[2], led_s[0], led_s[1], led_s[2] + 255, 1)
+            rgb_strip.add_led(hms[0]-1,  32, 0, 0, 0)
+            rgb_strip.add_led(hms[0]  , 255, 0, 0, 0)
+            rgb_strip.add_led(hms[0]+1,  32, 0, 0, 0)
+            rgb_strip.add_led(hms[1]-1, 0,  32, 0, 0)
+            rgb_strip.add_led(hms[1]  , 0, 255, 0, 0)
+            rgb_strip.add_led(hms[1]+1, 0,  32, 0, 0)
+            rgb_strip.add_led(hms[2]-1, 0, 0,  32, 0)
+            rgb_strip.add_led(hms[2]  , 0, 0, 255, 0)
+            rgb_strip.add_led(hms[2]+1, 0, 0,  32, 0)
 
             # Update the output
             rgb_strip.output()
@@ -168,6 +265,7 @@ def test_clock(rgb_strip):
             # Save new time
             last_hms = hms
         time.sleep(0.1)
+
 
 def main():
     print 'Hello!'
@@ -181,8 +279,10 @@ def main():
         )
 
         print 'Testing rgb_strip...'
-        # test_rainbow(rgb_strip)
+        #test_rainbow_train(rgb_strip)
         test_clock(rgb_strip)
+        #test_brightness(rgb_strip)
+        #test_rainbow(rgb_strip)
 
     except KeyboardInterrupt:
         pass
