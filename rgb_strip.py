@@ -1,15 +1,13 @@
 #!/usr/bin/python
 # -*- coding: utf8 -*-
-from collections import namedtuple
 from datetime import datetime
+import random
 import time
 
 import RPi.GPIO as GPIO
 
 from gpio_22 import GPIO22
 from lcd import LCD
-
-Color = namedtuple('Color', ('R', 'G', 'B', 'A'))
 
 
 """
@@ -86,12 +84,12 @@ class RGBStrip(object):
         led[RGBStrip.B] = int(b)
         led[RGBStrip.A] = int(a)
 
-    def add_led(self, index, r, g, b, a):
+    def add_led(self, index, r=0, g=0, b=0, a=0):
         led = self.LEDS[index % self.LED_COUNT]
-        led[RGBStrip.R] += int(r)
-        led[RGBStrip.G] += int(g)
-        led[RGBStrip.B] += int(b)
-        led[RGBStrip.A] += int(a)
+        led[RGBStrip.R] = min(led[RGBStrip.R] + int(r), 255)
+        led[RGBStrip.G] = min(led[RGBStrip.G] + int(g), 255)
+        led[RGBStrip.B] = min(led[RGBStrip.B] + int(b), 255)
+        led[RGBStrip.A] = min(led[RGBStrip.A] + int(a), 255)
 
     def get_led(self, index):
         return self.LEDS[index]
@@ -176,7 +174,7 @@ def test_brightness(rgb_strip):
 
 def test_rainbow_train(rgb_strip):
     """
-    Make 6 colors move along the strip & cycle round
+    Make 6 colours move along the strip & cycle round
     """
     index = 0
     while (True):
@@ -196,29 +194,22 @@ def test_rainbow_train(rgb_strip):
         index = (index + 1) % rgb_strip.LED_COUNT
 
 
-def get_rgba_rainbow(count, max_rgb=25, a=7):
+def get_rgb_rainbow(count, max_rgb=127):
     # Thanks to http://stackoverflow.com/questions/876853/generating-color-ranges-in-python
     import colorsys
     HSV_tuples = [
         (x*1.0/count, 1, 1)
         for x in range(count)
     ]
-    RGB_tuples = map(
-        lambda x: colorsys.hsv_to_rgb(*x),
-        HSV_tuples
-    )
-    
-    # Convert RGB tuples (0-1) to RGBA tuples (0-255)
-    RGBA_tuples = [
-        (
-            int(r*max_rgb),
-            int(g*max_rgb),
-            int(b*max_rgb),
-            a
-        )
-        for r, g, b in RGB_tuples
+    RGB_tuples = [
+        [
+            hsv * max_rgb
+            for hsv in colorsys.hsv_to_rgb(*hsv)
+        ]
+        for hsv in HSV_tuples
     ]
-    return RGBA_tuples
+
+    return RGB_tuples
 
 
 def test_rainbow(rgb_strip):
@@ -226,13 +217,13 @@ def test_rainbow(rgb_strip):
     Make the whole strip into a cycling rainbow
     """
     # Work out a rainbow for #LED_COUNT leds
-    COLOURS = get_rgba_rainbow(rgb_strip.LED_COUNT, max_rgb=127, a=1)
-    
+    COLOURS = get_rgb_rainbow(rgb_strip.LED_COUNT)
+
     index = 0
     while (True):
         # Output the LEDs
         for i in xrange(rgb_strip.LED_COUNT):
-            rgb_strip.set_led((index +  i) % rgb_strip.LED_COUNT, *COLOURS[i])
+            rgb_strip.set_led((index +  i) % rgb_strip.LED_COUNT, *COLOURS[i], a=1)
         rgb_strip.output()
 
         # Move the LED along
@@ -240,6 +231,9 @@ def test_rainbow(rgb_strip):
 
 
 def test_clock(rgb_strip):
+    """
+    A clock! Hours=Red, Minutes=Green, Seconds=Blue
+    """
     last_hms = None
     while True:
         now = datetime.now()
@@ -249,15 +243,15 @@ def test_clock(rgb_strip):
             rgb_strip.reset_leds(a=1)
 
             # Set new time
-            rgb_strip.add_led(hms[0]-1,  32, 0, 0, 0)
-            rgb_strip.add_led(hms[0]  , 255, 0, 0, 0)
-            rgb_strip.add_led(hms[0]+1,  32, 0, 0, 0)
-            rgb_strip.add_led(hms[1]-1, 0,  32, 0, 0)
-            rgb_strip.add_led(hms[1]  , 0, 255, 0, 0)
-            rgb_strip.add_led(hms[1]+1, 0,  32, 0, 0)
-            rgb_strip.add_led(hms[2]-1, 0, 0,  32, 0)
-            rgb_strip.add_led(hms[2]  , 0, 0, 255, 0)
-            rgb_strip.add_led(hms[2]+1, 0, 0,  32, 0)
+            rgb_strip.add_led(hms[0]-1, r= 32)
+            rgb_strip.add_led(hms[0]  , r=255)
+            rgb_strip.add_led(hms[0]+1, r= 32)
+            rgb_strip.add_led(hms[1]-1, g= 32)
+            rgb_strip.add_led(hms[1]  , g=255)
+            rgb_strip.add_led(hms[1]+1, g= 32)
+            rgb_strip.add_led(hms[2]-1, b= 32)
+            rgb_strip.add_led(hms[2]  , b=255)
+            rgb_strip.add_led(hms[2]+1, b= 32)
 
             # Update the output
             rgb_strip.output()
@@ -265,6 +259,57 @@ def test_clock(rgb_strip):
             # Save new time
             last_hms = hms
         time.sleep(0.1)
+
+
+def test_gravity(rgb_strip):
+    """
+    Shoot colours from one end and watch gravity pull them back down
+    """
+    COLOURS = get_rgb_rainbow(10)
+    SHOTS = []
+    MIN_SPEED = 0.5
+    MAX_SPEED = 1.0
+    G_SPEED = MAX_SPEED / (rgb_strip.LED_COUNT * 2)
+    print 'MAX_SPEED = {MAX_SPEED}'.format(MAX_SPEED=MAX_SPEED)
+    print 'LED_COUNT = {LED_COUNT}'.format(LED_COUNT=rgb_strip.LED_COUNT)
+    print 'G_SPEED   = {G_SPEED}'.format(G_SPEED=G_SPEED)
+
+    while True:
+        # Simulate existing shots
+        for shot in SHOTS:
+            # Update position
+            shot['position'] += shot['speed']
+            # Update speed
+            shot['speed'] -= G_SPEED
+
+        # Remove old shots
+        SHOTS = [
+            shot
+            for shot in SHOTS
+            if shot['position'] > 0
+        ]
+
+        # Add a new shot?
+        if random.random() < 0.2 / (len(SHOTS) + 1):
+            print 'Adding a shot! {count} existing'.format(count=len(SHOTS))
+            SHOTS.append({
+                'colour': random.choice(COLOURS),
+                'speed': random.uniform(MIN_SPEED, MAX_SPEED),
+                'position': 0.0
+            })
+
+        # Clear all the LEDs
+        rgb_strip.reset_leds(a=1)
+
+        # Show all the shots
+        for shot in SHOTS:
+            rgb_strip.add_led(
+                int(shot['position']),
+                *shot['colour']
+            )
+
+        # Update the output
+        rgb_strip.output()
 
 
 def main():
@@ -280,9 +325,10 @@ def main():
 
         print 'Testing rgb_strip...'
         #test_rainbow_train(rgb_strip)
-        test_clock(rgb_strip)
+        #test_clock(rgb_strip)
         #test_brightness(rgb_strip)
         #test_rainbow(rgb_strip)
+        test_gravity(rgb_strip)
 
     except KeyboardInterrupt:
         pass
