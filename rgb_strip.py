@@ -11,6 +11,15 @@ from lcd import LCD
 
 
 """
+To use SPI mode:
+    * sudo apt-get update
+    * sudo apt-get upgrade
+    * sudo raspi-config
+        * Advanced options
+        * SPI
+        * Enable
+    * pip install spidev
+
 TODO:
     Everything!
 """
@@ -29,24 +38,45 @@ class RGBStrip(object):
 
     def __init__(
             self,
-            pin_data,
-            pin_clock,
             led_count,
+            pin_data=None,
+            pin_clock=None,
         ):
-        self.PIN_DATA = pin_data
-        self.PIN_CLOCK = pin_clock
+        """
+        Note: To enable SPI mode, omit pin_data and pin_clock
+        """
         self.LED_COUNT = led_count
         self.LEDS = [
             [0, 0, 0, 0]
             for i in xrange(led_count)
         ]
 
-        self.BITS_5 = self._generate_binary_array_lookup(5)
-        self.BITS_8 = self._generate_binary_array_lookup(8)
+        self.SPI = None
+        self.PIN_DATA = pin_data
+        self.PIN_CLOCK = pin_clock
 
-        self.START_FRAME = [False] * 32
-        self.PADDING_FRAME = [True] * 3
-        self.END_FRAME = [True] * (led_count/2)
+        # Setup stuff based on what mode we're running in
+        if pin_data is None:
+            # Prepare the common frames
+            self.START_FRAME = [0x00] * 4
+            self.END_FRAME = [0xFF] * (led_count/2/8)
+
+            # Init the SPI bus
+            import spidev
+            self.SPI = spidev.SpiDev()
+            self.SPI.open(
+                0, #bus
+                0, #device
+            )
+        else:
+            # Prepare the common frames
+            self.START_FRAME = [False] * 32
+            self.PADDING_FRAME = [True] * 3
+            self.END_FRAME = [True] * (led_count/2)
+
+            # Prepare lookup tables
+            self.BITS_5 = self._generate_binary_array_lookup(5)
+            self.BITS_8 = self._generate_binary_array_lookup(8)
 
         self._init_pins()
 
@@ -70,14 +100,14 @@ class RGBStrip(object):
             GPIO.OUT,
         )
 
-    def reset_leds(self, r=0, g=0, b=0, a=0):
+    def set_leds(self, r=0, g=0, b=0, a=0):
         for led in self.LEDS:
             led[RGBStrip.R] = r
             led[RGBStrip.G] = g
             led[RGBStrip.B] = b
             led[RGBStrip.A] = a
 
-    def set_led(self, index, r, g, b, a):
+    def set_led(self, index, r=0, g=0, b=0, a=0):
         led = self.LEDS[index % self.LED_COUNT]
         led[RGBStrip.R] = int(r)
         led[RGBStrip.G] = int(g)
@@ -91,55 +121,94 @@ class RGBStrip(object):
         led[RGBStrip.B] = min(led[RGBStrip.B] + int(b), 255)
         led[RGBStrip.A] = min(led[RGBStrip.A] + int(a), 255)
 
-    def get_led(self, index):
-        return self.LEDS[index]
-
     def output(self):
+        if self.SPI:
+            self._output_spi()
+        else:
+            self._output_bits()
+
+    def _output_spi(self):
+        # TODO!
         # 32 - Start frame of 0s
-        self._output(self.START_FRAME)
+        self.SPI.xfer2(self.START_FRAME)
+
+        # Output each LED's values
+        for led in self.LEDS:
+            # 8 - Padding of 111 then the brightness
+            #     Sending 111 then AAAAA is the same as 111AAAAA
+            #     111AAAAA = 11100000 + AAAAA
+            #     11100000 = 128 + 64 + 32 = 224
+            # 8 - Blue
+            # 8 - Green
+            # 8 - Red
+            brightness_with_padding = 224 + led[RGBStrip.A]
+            self.SPI.xfer2([
+                brightness_with_padding,
+                led[RGBStrip.B],
+                led[RGBStrip.G],
+                led[RGBStrip.R]
+            ])
+
+        # (LED_COUNT/2) - End frame of 1s
+        self.SPI.xfer2(self.END_FRAME)
+
+    def _output_bits(self):
+        # 32 - Start frame of 0s
+        self._output_bit(self.START_FRAME)
 
         # Output each LED's values
         for led in self.LEDS:
             # 3 - Padding of 1s
-            self._output(self.PADDING_FRAME)
+            self._output_bit(self.PADDING_FRAME)
 
             # 5 - Brightness
-            self._output(self.BITS_5[led[RGBStrip.A]])
+            self._output_bit(self.BITS_5[led[RGBStrip.A]])
 
             # 8 - Blue
-            self._output(self.BITS_8[led[RGBStrip.B]])
+            self._output_bit(self.BITS_8[led[RGBStrip.B]])
 
             # 8 - Green
-            self._output(self.BITS_8[led[RGBStrip.G]])
+            self._output_bit(self.BITS_8[led[RGBStrip.G]])
 
             # 8 - Red
-            self._output(self.BITS_8[led[RGBStrip.R]])
+            self._output_bit(self.BITS_8[led[RGBStrip.R]])
 
         # (LED_COUNT/2) - End frame of 1s
-        self._output(self.END_FRAME)
+        self._output_bit(self.END_FRAME)
 
-    def _output(self, values):
-        for value in values:
+    def _output_bit(self, bits):
+        for bit in bits:
             # Set the data pin
-            GPIO.output(self.PIN_DATA, value)
+            GPIO.output(self.PIN_DATA, bit)
 
             # Cycle the clock
             GPIO.output(self.PIN_CLOCK, True)
             GPIO.output(self.PIN_CLOCK, False)
+
+    @staticmethod
+    def get_rgb_rainbow(count, max_rgb=127):
+        # Thanks to http://stackoverflow.com/questions/876853/generating-color-ranges-in-python
+        import colorsys
+        HSV_tuples = [
+            (x*1.0/count, 1, 1)
+            for x in range(count)
+        ]
+        RGB_tuples = [
+            [
+                hsv * max_rgb
+                for hsv in colorsys.hsv_to_rgb(*hsv)
+            ]
+            for hsv in HSV_tuples
+        ]
+
+        return RGB_tuples
 
 
 def test_brightness(rgb_strip):
     """
     Test what different brightness & RGB levels look like
     """
-    COLOURS = (
-        (255,   0,   0),
-        (255, 255,   0),
-        (  0, 255,   0),
-        (  0, 255, 255),
-        (  0,   0, 255),
-        (255,   0, 255),
-    )
+    COLOURS = RGBStrip.get_rgb_rainbow(6, max_rgb=255)
     COLOUR = 0
     while (True):
         # Get the current colour and move to the next colour
@@ -176,40 +245,17 @@ def test_rainbow_train(rgb_strip):
     """
     Make 6 colours move along the strip & cycle round
     """
+    COLOURS = RGBStrip.get_rgb_rainbow(6, max_rgb=127)
     index = 0
     while (True):
         # Output the LEDs
-        rgb_strip.set_led((index +  5) % rgb_strip.LED_COUNT, 255,   0,   0, 31)
-        rgb_strip.set_led((index +  4) % rgb_strip.LED_COUNT, 255, 255,   0, 31)
-        rgb_strip.set_led((index +  3) % rgb_strip.LED_COUNT,   0, 255,   0, 31)
-        rgb_strip.set_led((index +  2) % rgb_strip.LED_COUNT,   0, 255, 255, 31)
-        rgb_strip.set_led((index +  1) % rgb_strip.LED_COUNT,   0,   0, 255, 31)
-        rgb_strip.set_led((index +  0) % rgb_strip.LED_COUNT, 255,   0, 255, 31)
+        rgb_strip.set_leds()
+        for i, colour in enumerate(COLOURS):
+            rgb_strip.set_led((index +  i) % rgb_strip.LED_COUNT, *colour, a=1)
         rgb_strip.output()
 
-        # Reset the first LED (all others will get changed again next time)
-        rgb_strip.set_led((index +  0) % rgb_strip.LED_COUNT, 0, 0, 0, 0)
-
-        # Move the LED along
+        # Move the train along
         index = (index + 1) % rgb_strip.LED_COUNT
-
-
-def get_rgb_rainbow(count, max_rgb=127):
-    # Thanks to http://stackoverflow.com/questions/876853/generating-color-ranges-in-python
-    import colorsys
-    HSV_tuples = [
-        (x*1.0/count, 1, 1)
-        for x in range(count)
-    ]
-    RGB_tuples = [
-        [
-            hsv * max_rgb
-            for hsv in colorsys.hsv_to_rgb(*hsv)
-        ]
-        for hsv in HSV_tuples
-    ]
-
-    return RGB_tuples
 
 
 def test_rainbow(rgb_strip):
@@ -217,7 +263,7 @@ def test_rainbow(rgb_strip):
     Make the whole strip into a cycling rainbow
     """
     # Work out a rainbow for #LED_COUNT leds
-    COLOURS = get_rgb_rainbow(rgb_strip.LED_COUNT)
+    COLOURS = RGBStrip.get_rgb_rainbow(rgb_strip.LED_COUNT)
 
     index = 0
     while (True):
@@ -240,7 +286,7 @@ def test_clock(rgb_strip):
         hms = (now.hour, now.minute, now.second)
         if hms != last_hms:
             # Clear all the LEDs
-            rgb_strip.reset_leds(a=1)
+            rgb_strip.set_leds(a=1)
 
             # Set new time
             rgb_strip.add_led(hms[0]-1, r= 32)
@@ -265,7 +311,7 @@ def test_gravity(rgb_strip):
     """
     Shoot colours from one end and watch gravity pull them back down
     """
-    COLOURS = get_rgb_rainbow(10)
+    COLOURS = RGBStrip.get_rgb_rainbow(10)
     SHOTS = []
     MIN_SPEED = 0.5
     MAX_SPEED = 1.0
@@ -299,7 +345,7 @@ def test_gravity(rgb_strip):
             })
 
         # Clear all the LEDs
-        rgb_strip.reset_leds(a=1)
+        rgb_strip.set_leds(a=1)
 
         # Show all the shots
         for shot in SHOTS:
@@ -318,13 +364,13 @@ def main():
         print 'Initialising...'
         GPIO.setmode(GPIO.BCM)
         rgb_strip = RGBStrip(
+            led_count=60,
             pin_data=GPIO22.SCLK,
             pin_clock=GPIO22.MISO,
-            led_count=60,
         )
 
         print 'Testing rgb_strip...'
-        #test_rainbow_train(rgb_strip)
+        test_rainbow_train(rgb_strip)
         #test_clock(rgb_strip)
         #test_brightness(rgb_strip)
         #test_rainbow(rgb_strip)
