@@ -34,14 +34,23 @@ class RGBStrip(object):
 
     def __init__(
             self,
-            led_count,
+            led_count=None,
+            width=None,
+            height=None,
             pin_data=None,
             pin_clock=None,
         ):
         """
         Note: To enable SPI mode, omit pin_data and pin_clock
         """
-        self.LED_COUNT = led_count
+        if width:
+            self.WIDTH = width
+            self.HEIGHT = height
+        else:
+            self.WIDTH = led_count
+            self.HEIGHT = 1
+
+        self.LED_COUNT = width * height
 
         # Work out some byte counts
         self.BYTES_START = 4
@@ -51,11 +60,14 @@ class RGBStrip(object):
         self.BYTES_TOTAL = self.BYTES_START + self.BYTES_LED + self.BYTES_END
 
         # Setup the byte array that we will output
-        self.BYTES = [0] * self.BYTES_TOTAL
+        self.BYTES = [None] * self.BYTES_TOTAL
 
         # Setup the start & end frames
         self.BYTES[:self.BYTES_START] = [0x00] * self.BYTES_START
         self.BYTES[-self.BYTES_END:] = [0xFF] * self.BYTES_END
+
+        # Setup the LED frames so the padding bits are set correctly
+        self.set_leds()
 
         # Where to write the data to (depending on our mode)
         self.SPI = None
@@ -105,8 +117,11 @@ class RGBStrip(object):
             for num in xrange(2**bit_count)
         ]
 
-    def _get_led_offset(self, index):
+    def _get_offset(self, index):
         return self.BYTES_START + index * 4
+
+    def _get_index(self, x, y):
+        return (y * self.WIDTH) + (x if y % 2 == 0 else self.WIDTH - x - 1)
 
     def set_leds(self, r=0, g=0, b=0, a=0):
         for offset in xrange(self.BYTES_START, self.BYTES_START + self.BYTES_LED, 4):
@@ -119,24 +134,32 @@ class RGBStrip(object):
             )
 
     def set_led(self, index, r=0, g=0, b=0, a=0):
-        offset = self._get_led_offset(index)
+        offset = self._get_offset(index)
         self._set_led(
-            self._get_led_offset(index),
+            self._get_offset(index),
             r,
             g,
             b,
             a
         )
 
+    def set_led_xy(self, x, y, r=0, g=0, b=0, a=0):
+        index = self._get_index(x, y)
+        self.set_led(index, r, g, b, a)
+
     def add_led(self, index, r=0, g=0, b=0, a=0):
-        offset = self._get_led_offset(index)
+        offset = self._get_offset(index)
         self._set_led(
-            self._get_led_offset(index),
+            self._get_offset(index),
             self.BYTES[offset + 3] + r,
             self.BYTES[offset + 2] + g,
             self.BYTES[offset + 1] + b,
             self.BYTES[offset + 0] + a
         )
+
+    def add_led_xy(self, x, y, r=0, g=0, b=0, a=0):
+        index = self._get_index(x, y)
+        self.add_led(index, r, g, b, a)
 
     def _set_led(self, offset, r, g, b, a):
         # Brightness max is 31; or with 224 to add the padding 1s
@@ -226,17 +249,18 @@ def test_rainbow_train(rgb_strip):
     """
     Make 6 colours move along the strip & cycle round
     """
-    COLOURS = RGBStrip.get_rgb_rainbow(6, max_rgb=127)
+    COLOURS = RGBStrip.get_rgb_rainbow(10, max_rgb=127)
     index = 0
     while (True):
         # Output the LEDs
         rgb_strip.set_leds()
         for i, colour in enumerate(COLOURS):
-            rgb_strip.set_led((index +  i) % rgb_strip.LED_COUNT, *colour, a=1)
+            for y in xrange(rgb_strip.HEIGHT):
+                rgb_strip.set_led_xy((index +  i) % rgb_strip.WIDTH, y, *colour, a=1)
         rgb_strip.output()
 
         # Move the train along
-        index = (index + 1) % rgb_strip.LED_COUNT
+        index = (index + 1) % rgb_strip.WIDTH
 
         time.sleep(0.02)
 
@@ -245,14 +269,15 @@ def test_rainbow(rgb_strip):
     """
     Make the whole strip into a cycling rainbow
     """
-    # Work out a rainbow for #LED_COUNT leds
-    COLOURS = RGBStrip.get_rgb_rainbow(rgb_strip.LED_COUNT)
+    # Work out a rainbow for #WIDTH leds
+    COLOURS = RGBStrip.get_rgb_rainbow(rgb_strip.WIDTH)
 
     index = 0
     while (True):
         # Output the LEDs
-        for i in xrange(rgb_strip.LED_COUNT):
-            rgb_strip.set_led((index +  i) % rgb_strip.LED_COUNT, *COLOURS[i], a=1)
+        for x in xrange(rgb_strip.WIDTH):
+            for y in xrange(rgb_strip.HEIGHT):
+                rgb_strip.set_led_xy((index +  x) % rgb_strip.WIDTH, y, *COLOURS[x], a=1)
         rgb_strip.output()
 
         # Move the LED along
@@ -272,15 +297,10 @@ def test_clock(rgb_strip):
             rgb_strip.set_leds(a=1)
 
             # Set new time
-            rgb_strip.add_led(hms[0]-1, r= 32)
-            rgb_strip.add_led(hms[0]  , r=255)
-            rgb_strip.add_led(hms[0]+1, r= 32)
-            rgb_strip.add_led(hms[1]-1, g= 32)
-            rgb_strip.add_led(hms[1]  , g=255)
-            rgb_strip.add_led(hms[1]+1, g= 32)
-            rgb_strip.add_led(hms[2]-1, b= 32)
-            rgb_strip.add_led(hms[2]  , b=255)
-            rgb_strip.add_led(hms[2]+1, b= 32)
+            for y in xrange(rgb_strip.HEIGHT):
+                rgb_strip.add_led_xy(hms[0], y, r=255)
+                rgb_strip.add_led_xy(hms[1], y, g=255)
+                rgb_strip.add_led_xy(hms[2], y, b=255)
 
             # Update the output
             rgb_strip.output()
@@ -298,10 +318,10 @@ def test_gravity(rgb_strip):
     SHOTS = []
     MIN_SPEED = 0.5
     MAX_SPEED = 1.0
-    G_SPEED = MAX_SPEED / (rgb_strip.LED_COUNT * 2)
-    print 'MAX_SPEED = {MAX_SPEED}'.format(MAX_SPEED=MAX_SPEED)
-    print 'LED_COUNT = {LED_COUNT}'.format(LED_COUNT=rgb_strip.LED_COUNT)
-    print 'G_SPEED   = {G_SPEED}'.format(G_SPEED=G_SPEED)
+    G_SPEED = MAX_SPEED / (rgb_strip.WIDTH * 2)
+    print 'MAX_SPEED = {}'.format(MAX_SPEED)
+    print 'WIDTH     = {}'.format(rgb_strip.WIDTH)
+    print 'G_SPEED   = {}'.format(G_SPEED)
 
     while True:
         # Simulate existing shots
@@ -332,13 +352,17 @@ def test_gravity(rgb_strip):
 
         # Show all the shots
         for shot in SHOTS:
-            rgb_strip.add_led(
-                int(shot['position']),
-                *shot['colour']
-            )
+            for y in xrange(rgb_strip.HEIGHT):
+                rgb_strip.add_led_xy(
+                    int(shot['position']),
+                    y,
+                    *shot['colour']
+                )
 
         # Update the output
         rgb_strip.output()
+
+        time.sleep(0.02)
 
 
 def main():
@@ -348,7 +372,9 @@ def main():
         print 'Initialising...'
         GPIO.setmode(GPIO.BCM)
         rgb_strip = RGBStrip(
-            led_count=60,
+            #led_count=120,
+            width=60,
+            height=2,
             #pin_data=GPIO22.MOSI,
             #pin_clock=GPIO22.SCLK,
         )
@@ -357,8 +383,8 @@ def main():
         #test_rainbow_train(rgb_strip)
         #test_clock(rgb_strip)
         #test_brightness(rgb_strip)
-        test_rainbow(rgb_strip)
-        #test_gravity(rgb_strip)
+        #test_rainbow(rgb_strip)
+        test_gravity(rgb_strip)
 
     except KeyboardInterrupt:
         pass
