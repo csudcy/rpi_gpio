@@ -25,6 +25,7 @@ To use SPI mode:
 TODO:
     Everything!
     Make RainbowTrain loop instead of jumping back to x=0 every line
+    Add_led is buggy - if value is > 255, it should be 255 (not value & 255)
 """
 
 
@@ -82,7 +83,7 @@ class RGBStrip(object):
             self._init_pins(pin_data, pin_clock)
 
         # Setup a list of renderers
-        self.RENDERERS = set()
+        self.RENDERERS = []
 
     def _init_spi(self):
         # Init the SPI bus
@@ -174,7 +175,8 @@ class RGBStrip(object):
         self.BYTES[offset + 3] = int(r) & 255
 
     def add_renderer(self, renderer):
-        self.RENDERERS.add(renderer)
+        if renderer not in self.RENDERERS:
+            self.RENDERERS.append(renderer)
 
     def render(self):
         """
@@ -211,12 +213,12 @@ class RGBStrip(object):
                 GPIO.output(self.PIN_CLOCK, False)
 
     @staticmethod
-    def get_rgb_rainbow(count, max_rgb=127):
+    def get_rgb_rainbow(steps, max_rgb=127):
         # Thanks to http://stackoverflow.com/questions/876853/generating-color-ranges-in-python
         import colorsys
         HSV_tuples = [
-            (x*1.0/count, 1, 1)
-            for x in range(count)
+            (x*1.0/steps, 1, 1)
+            for x in range(steps)
         ]
         RGB_tuples = [
             [
@@ -228,32 +230,8 @@ class RGBStrip(object):
 
         return RGB_tuples
 
-
-StripSection = namedtuple('StripSection', ('id', 'rgb_strip', 'x', 'y'))
-
-class RainbowTrainRenderer(object):
-    def __init__(self, width, height=1, train_length=10, max_rgb=127):
-        self.width = width
-        self.height = height
-
-        self.outputs = []
-        self.COLOURS = RGBStrip.get_rgb_rainbow(train_length, max_rgb=max_rgb)
-        self.x = 0
-        self.y = 0
-
-    def add_output(self, id, rgb_strip, x, y=1):
-        # Save this in my list of outputs
-        self.outputs.append(StripSection(
-            id,
-            rgb_strip,
-            x,
-            y
-        ))
-
-        # Register myself with the rgb_strip so I will get rendered & output
-        rgb_strip.add_renderer(self)
-
-    def xy_inc(self, x, y, w, h):
+    @staticmethod
+    def xy_inc(x, y, w, h):
         # Move to the next column
         x += 1
         if x >= w:
@@ -264,23 +242,81 @@ class RainbowTrainRenderer(object):
                 y = 0
         return x, y
 
-    def render(self):
-        for output in self.outputs:
-            # Clear the LEDs
-            for x in xrange(output.x, output.x + self.width):
-                for y in xrange(output.y, output.y + self.height):
-                    #print 'Clr', output.id, x, y
-                    output.rgb_strip.set_led_xy(x, y)
 
+StripSection = namedtuple('StripSection', ('ID', 'RGB_STRIP', 'X', 'Y'))
+
+
+class RGBStripRenderer(object):
+    def __init__(self, width, height=1):
+        self.WIDTH = width
+        self.HEIGHT = height
+
+        self.OUTPUTS = []
+
+    def add_output(self, id, rgb_strip, x, y=0):
+        # Save this in my list of outputs
+        self.OUTPUTS.append(StripSection(
+            id,
+            rgb_strip,
+            x,
+            y
+        ))
+
+        # Register myself with the rgb_strip so I will get rendered & output
+        rgb_strip.add_renderer(self)
+
+    def render(self):
+        raise Exception('render must be overridden by inheriting classes!')
+
+
+class RainbowTrainRenderer(RGBStripRenderer):
+    def __init__(self, width, height=1, train_length=10, max_rgb=127):
+        super(RainbowTrainRenderer, self).__init__(width, height)
+
+        self.COLOURS = RGBStrip.get_rgb_rainbow(train_length, max_rgb=max_rgb)
+        self.X = 0
+        self.Y = 0
+
+    def render(self):
+        for output in self.OUTPUTS:
             # Output the colours
-            x, y = self.x, self.y
+            x, y = self.X, self.Y
             for i, colour in enumerate(self.COLOURS):
-                x, y = self.xy_inc(x, y, self.width, self.height)
-                #print 'Out', output.id, x, y, output.x + x, output.y + y, self.width, self.height
-                output.rgb_strip.set_led_xy(output.x + x, output.y + y, *colour, a=1)
+                x, y = RGBStrip.xy_inc(x, y, self.WIDTH, self.HEIGHT)
+                #print 'Out', output.ID, x, y, output.X + x, output.Y + y, self.WIDTH, self.HEIGHT
+                output.RGB_STRIP.add_led_xy(output.X + x, output.Y + y, *colour, a=1)
 
         # Move the train along
-        self.x, self.y = self.xy_inc(self.x, self.y, self.width, self.height)
+        self.X, self.Y = RGBStrip.xy_inc(self.X, self.Y, self.WIDTH, self.HEIGHT)
+
+
+class ClockRenderer(RGBStripRenderer):
+    def __init__(self):
+        super(ClockRenderer, self).__init__(60, 1)
+
+    def render(self):
+        now = datetime.now()
+        for output in self.OUTPUTS:
+            output.RGB_STRIP.add_led_xy(output.X + now.hour, output.Y, r=255, a=1)
+            output.RGB_STRIP.add_led_xy(output.X + now.minute, output.Y, g=255, a=1)
+            output.RGB_STRIP.add_led_xy(output.X + now.second, output.Y, b=255, a=1)
+
+
+class PatchRenderer(RGBStripRenderer):
+    def __init__(self, width, height=1, rgb_colours=((255, 0, 0), ), a=1):
+        super(PatchRenderer, self).__init__(width, height)
+
+        self.RGB_COLOURS = rgb_colours
+        self.A = a
+        self.INDEX = 0
+
+    def render(self):
+        rgb_colour = self.RGB_COLOURS[self.INDEX]
+        for output in self.OUTPUTS:
+            for x in xrange(self.WIDTH):
+                for y in xrange(self.HEIGHT):
+                    output.RGB_STRIP.add_led_xy(output.X + x, output.Y + y, *rgb_colour, a=self.A)
+        self.INDEX = (self.INDEX + 1) % len(self.RGB_COLOURS)
 
 
 def test_brightness(rgb_strip):
@@ -342,26 +378,19 @@ def test_clock(rgb_strip):
     """
     A clock! Hours=Red, Minutes=Green, Seconds=Blue
     """
-    last_hms = None
-    while True:
-        now = datetime.now()
-        hms = (now.hour, now.minute, now.second)
-        if hms != last_hms:
-            # Clear all the LEDs
-            rgb_strip.set_leds(a=1)
+    clock = ClockRenderer()
+    for y in xrange(rgb_strip.HEIGHT):
+        clock.add_output('RT', rgb_strip, 0, y)
+    rgb_strip.render_forever()
 
-            # Set new time
-            for y in xrange(rgb_strip.HEIGHT):
-                rgb_strip.add_led_xy(hms[0], y, r=255)
-                rgb_strip.add_led_xy(hms[1], y, g=255)
-                rgb_strip.add_led_xy(hms[2], y, b=255)
 
-            # Update the output
-            rgb_strip.output()
-
-            # Save new time
-            last_hms = hms
-        time.sleep(0.1)
+def test_patch(rgb_strip):
+    """
+    Cycle the whole strip through a rainobw of colours
+    """
+    r = PatchRenderer(rgb_strip.WIDTH, rgb_strip.HEIGHT, RGBStrip.get_rgb_rainbow(250, max_rgb=32))
+    r.add_output('Patch', rgb_strip, 0, 0)
+    rgb_strip.render_forever()
 
 
 def test_gravity(rgb_strip):
@@ -420,15 +449,25 @@ def test_gravity(rgb_strip):
 
 
 def test_many(rgb_strip):
-    rt1 = RainbowTrainRenderer(30, 2, 60)
-    rt1.add_output('RT1  ', rgb_strip, 0, 0)
+    r = PatchRenderer(5, 2)
+    r.add_output('Patch-Red', rgb_strip, 5, 0)
 
-    rt2 = RainbowTrainRenderer(30, 1)
-    rt2.add_output('RT2 T', rgb_strip, 30, 0)
-    rt2.add_output('RT2 B', rgb_strip, 30, 1)
-    while (True):
-        rgb_strip.render()
-        time.sleep(0.01)
+    r = PatchRenderer(5, 2, RGBStrip.get_rgb_rainbow(250, max_rgb=32))
+    r.add_output('Patch-Rainbow', rgb_strip, 15, 0)
+
+    r = RainbowTrainRenderer(30, 1)
+    r.add_output('RT-30x10', rgb_strip,  0, 0)
+
+    r = RainbowTrainRenderer(30, 1, train_length=30)
+    r.add_output('RT-30x30', rgb_strip,  30, 0)
+
+    r = RainbowTrainRenderer(60, 1)
+    r.add_output('RT-60x10', rgb_strip,  0, 1)
+
+    r = ClockRenderer()
+    r.add_output('Clock', rgb_strip, 0, 1)
+
+    rgb_strip.render_forever()
 
 
 def main():
@@ -449,9 +488,10 @@ def main():
         #test_brightness(rgb_strip)
         #test_rainbow_train(rgb_strip)
         #test_rainbow(rgb_strip)
-        test_clock(rgb_strip)
-        #test_gravity(rgb_strip)
-        #test_many(rgb_strip)
+        #test_clock(rgb_strip)
+        #test_patch(rgb_strip)
+        test_gravity(rgb_strip)
+        test_many(rgb_strip)
 
     except KeyboardInterrupt:
         pass
